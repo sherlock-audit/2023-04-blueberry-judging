@@ -193,6 +193,48 @@ Manual Review
 
 Calculate rewards like [WConvexPools](https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/wrapper/WConvexPools.sol#L110-L121) to reduce precision loss as much as possible.
 
+
+
+## Discussion
+
+**bwafflef**
+
+@sherlock-admin @Gornutz 
+I think the logic of `pendingRewards` function in `WIchiFarm.sol` contract is accurate and there is no loss of rewards.
+For this, we need to have a look at `accShare` logic of `IchiFarm` contract. `accShare` is the variable represents `rewards per input amount(lp)`. Reward token of `IchiFarm` contract is `ICHI(v1)` token which it's decimal is 9, so both of `stIchi` and `enIchi` has 9 decimals (the same as `ICHI(v1)` token's decimal). This `ICHI(v1)` token is converted to `ICHI(v2)` token  which has 18 decimals, and distributed to users in `burn` function (https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/wrapper/WIchiFarm.sol#L177-L180)
+
+For this case ( `860000000 * 1e9 / 1e18 = 0.86 which is truncated to 0` ), reward is calculated as 0 not only on our side but also `IchiFarm` contract side and there is no loss of rewards. Let me know if you still have some questions.
+
+**IAm0x52**
+
+Your comment would be true if a single user made up the entire pool. However the pool is an aggregate of many users that all earn rewards as a whole (all LP deposited to the same address). It would be true that each user may not accumulate more than the minimum individually but as a collective they would exceed it and therefore should be due their fair share.
+
+**bwafflef**
+
+> Your comment would be true if a single user made up the entire pool. However the pool is an aggregate of many users that all earn rewards as a whole (all LP deposited to the same address). It would be true that each user may not accumulate more than the minimum individually but as a collective they would exceed it and therefore should be due their fair share.
+
+It seems like your suggestion might be correct, but it will never happen that `as a collective they would exceed it and therefore should be due fair share`. Is there any case this happens? The `example` in the above is not the case for this.
+
+**IAm0x52**
+
+If there are two users and they deposit 500000000 LP each. Each user will be due:
+
+`500000000 * 1e9 / 1e18 = 0.5 => 0`
+
+Together there will be 1000000000 LP so as a whole they will earn from the ICHI farm:
+
+`1000000000 * 1e9 / 1e18 = 1`
+
+If each user were to deposit independently, neither would receive a reward form the farm (both truncate to 0) but when put in together they earn 1 which isn't truncated. Therefore in that case both users should be due their fair share 
+
+**bwafflef**
+
+@IAm0x52  i get your point, but reward loss in this case is 0.5 wei, which is quite small. I'm not sure about the solution to handle this kind of minor amount smaller than 1 wei. Do you have any suggestion?
+
+**bwafflef**
+
+Also the important point we need to consider here is that reward calc logic in `pendingRewards` function is the same in `IchiFarm` contract following masterChef contract logic. This means there is a loss of 0.5 wei ICHI(reward) when we claim ICHI reward from `IchiFarm` contract.
+
 # Issue H-4: Pending CRV rewards are not accounted for and can cause unfair liquidations 
 
 Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/136 
@@ -727,56 +769,7 @@ Manual Review
 
 Use sequencer oracle to determine whether the sequencer is offline or not, and don't allow orders to be executed while the sequencer is offline.
 
-# Issue M-2: IchiSpell applies slippage to sqrtPrice which is wrong and leads to unpredictable slippage 
-
-Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/131 
-
-## Found by 
-0x52
-
-## Summary
-
-UniswapV3 uses the sqrt of the price rather than the price itself, but slippage is applied directly to the sqrt of the price which leads to unpredictable prices.
-
-## Vulnerability Detail
-
-[IchiSpell.sol#L211-L222](https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/spell/IchiSpell.sol#L211-L222)
-
-            uint160 deltaSqrt = (param.sqrtRatioLimit *
-                uint160(param.sellSlippage)) / uint160(Constants.DENOMINATOR);
-            SWAP_POOL.swap(
-                address(this),
-                // if withdraw token is Token0, then swap token1 -> token0 (false)
-                !isTokenA,
-                amountToSwap.toInt256(),
-                isTokenA
-                    ? param.sqrtRatioLimit + deltaSqrt
-                    : param.sqrtRatioLimit - deltaSqrt, // slippaged price cap
-                abi.encode(address(this))
-            );
-
-We see above that the sell slippage is applied to the sqrtPrice instead of the actual price. This means that applied slippage limits are not applied correctly and can be much larger than intended.
-
-Example:
-The protocol wants to limit slippage to 10%. This limit is applied to the sqrt price so if the sqrt price is 10 (price = 100) then it will apply 10% to that making it 9. Now to get the true price we need to square the price which gives us a price of 81. This translates to a true slippage limit of 19% rather than 10%.
-
-## Impact
-
-Slippage limits are much larger than intended
-
-## Code Snippet
-
-[IchiSpell.sol#L181-L236](https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/spell/IchiSpell.sol#L181-L236)
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Apply slippage requirement on price not sqrt price
-
-# Issue M-3: rewardTokens removed from WAuraPool/WConvexPools will be lost forever 
+# Issue M-2: rewardTokens removed from WAuraPool/WConvexPools will be lost forever 
 
 Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/128 
 
@@ -834,7 +827,7 @@ Manual Review
 
 Reward tokens should be stored with the tokenID so that it can still be paid out even if it the extra rewardToken is removed.
 
-# Issue M-4: Issue 327 from previous contest has not been fixed 
+# Issue M-3: Issue 327 from previous contest has not been fixed 
 
 Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/125 
 
@@ -886,7 +879,7 @@ Manual Review
 
 See [Issue 327](https://github.com/sherlock-audit/2023-02-blueberry-judging/issues/327) 
 
-# Issue M-5: AuraSpell#closePositionFarm requires users to swap all reward tokens through same router 
+# Issue M-4: AuraSpell#closePositionFarm requires users to swap all reward tokens through same router 
 
 Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/122 
 
@@ -932,7 +925,7 @@ Manual Review
 
 Allow users to use an aggregator like paraswap or multiple routers instead of only one single UniswapV2 router.
 
-# Issue M-6: Issue 94 from previous contest has not been fixed 
+# Issue M-5: Issue 94 from previous contest has not been fixed 
 
 Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/118 
 
@@ -963,12 +956,12 @@ Manual Review
 
 See [Issue 94](https://github.com/sherlock-audit/2023-02-blueberry-judging/issues/94)
 
-# Issue M-7: Issue 290 from previous contest has not been fully addressed by fixes 
+# Issue M-6: Issue 290 from previous contest has not been fully addressed by fixes 
 
 Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/117 
 
 ## Found by 
-0x52, HonorLt, cducrest-brainbot
+0x52, HonorLt, cducrest-brainbot, dacian
 
 ## Summary
 
@@ -996,7 +989,7 @@ Manual Review
 
 When repay is paused and then resumed, put a timer that prevents liquidations for some amount of time after (i.e. 4 hours) so that users can fairly repay their position after repayment has been resumed.
 
-# Issue M-8: BlueBerryBank#getPositionValue causes DOS if reward token is added that doens't have an oracle 
+# Issue M-7: BlueBerryBank#getPositionValue causes DOS if reward token is added that doens't have an oracle 
 
 Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/115 
 
@@ -1036,145 +1029,7 @@ Manual Review
 
 Return zero valuation if extra reward token can't be priced.
 
-# Issue M-9: `getPositionRisk()` will return a wrong value of risk 
-
-Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/97 
-
-## Found by 
-Ch\_301
-
-## Summary
-In order to interact with SPELL the users need to `lend()` some collateral which is known as **Isolated Collateral** and the SoftVault will deposit them into Compound protocol to generate some lending interest (to earn passive yield)  
-
-## Vulnerability Detail
-to [liquidate](https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/BlueBerryBank.sol#L487-L548) a position this function `isLiquidatable()` should return `true`
-```solidity
-    function isLiquidatable(uint256 positionId) public view returns (bool) {
-        return
-            getPositionRisk(positionId) >=
-            banks[positions[positionId].underlyingToken].liqThreshold;
-    }
-```
-and it is subcall to `getPositionRisk()`
-```solidity
-    function getPositionRisk(
-        uint256 positionId
-    ) public view returns (uint256 risk) {
-        uint256 pv = getPositionValue(positionId);          
-        uint256 ov = getDebtValue(positionId);             
-        uint256 cv = getIsolatedCollateralValue(positionId);
-
-        if (
-            (cv == 0 && pv == 0 && ov == 0) || pv >= ov // Closed position or Overcollateralized position
-        ) {
-            risk = 0;
-        } else if (cv == 0) {
-            // Sth bad happened to isolated underlying token
-            risk = Constants.DENOMINATOR;
-        } else {
-            risk = ((ov - pv) * Constants.DENOMINATOR) / cv;
-        }
-    }
-```
-as we can see the `cv`  is a critical value in terms of the calculation of `risk `
-the `cv` is returned by `getIsolatedCollateralValue()`
-
-```solidity
-    function getIsolatedCollateralValue(
-        uint256 positionId
-    ) public view override returns (uint256 icollValue) {
-        Position memory pos = positions[positionId];
-        // NOTE: exchangeRateStored has 18 decimals.
-        uint256 underlyingAmount;
-        if (_isSoftVault(pos.underlyingToken)) {
-            underlyingAmount =                                              
-                (ICErc20(banks[pos.debtToken].bToken).exchangeRateStored() * 
-                    pos.underlyingVaultShare) /
-                Constants.PRICE_PRECISION; 
-        } else {
-            underlyingAmount = pos.underlyingVaultShare;
-        }
-        icollValue = oracle.getTokenValue(
-            pos.underlyingToken,
-            underlyingAmount
-        );
-    }
- ```
-and it uses `exchangeRateStored()` to ask Compound (CToken.sol) for the exchange rate 
-[from `CToken` contract ](https://github.com/compound-finance/compound-protocol/blob/master/contracts/CToken.sol#LL281C18-L281C18)
-```diff
-This function does not accrue interest before calculating the exchange rate
-``` 
-so the `getPositionRisk()` will return a wrong value of risk because the interest does not accrue for this position 
-
-## Impact
-the user (position) could get liquidated even if his position is still healthy 
-  
-## Code Snippet
-https://github.com/compound-finance/compound-protocol/blob/master/contracts/CToken.sol#LL270C1-L286C6
-```solidity
-    /**
-     * @notice Accrue interest then return the up-to-date exchange rate
-     * @return Calculated exchange rate scaled by 1e18
-     */
-    function exchangeRateCurrent() override public nonReentrant returns (uint) {
-        accrueInterest();
-        return exchangeRateStored();
-    }
-
-    /**
-     * @notice Calculates the exchange rate from the underlying to the CToken
-     * @dev This function does not accrue interest before calculating the exchange rate
-     * @return Calculated exchange rate scaled by 1e18
-     */
-    function exchangeRateStored() override public view returns (uint) {
-        return exchangeRateStoredInternal();
-    }
-```    
-## Tool used
-
-Manual Review
-
-## Recommendation
-You shoud use `exchangeRateCurrent()` to  Accrue interest first.
-
-# Issue M-10: Potential DOS / lack of acccess to oracle price due to unhandled chainlink revert 
-
-Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/77 
-
-## Found by 
-Bauchibred, darksnow
-
-
-## Summary
-
-Chainlink's latestRoundData() is being implemented in scope, and the call to this could potentially revert and make it impossible to query any prices. This could lead to permanent denial of service.
-
-## Vulnerability Detail
-
-[See this](https://blog.openzeppelin.com/secure-smart-contract-guidelines-the-dangers-of-price-oracles/)
-The ChainlinkAdapterOracle.getPrice() function makes use of Chainlink's latestRoundData() to get the latest price. However, there is no fallback logic to be executed when the access to the Chainlink data feed is denied by Chainlink's multisigs. While currently there’s no whitelisting mechanism to allow or disallow contracts from reading prices, powerful multisigs can tighten these access controls. In other words, the multisigs can immediately block access to price feeds at will.
-
-## Impact
-
-Denial of service to the protocol due to ChainlinkAdapterOracle.getPrice() reverting
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2023-04-blueberry/blob/96eb1829571dc46e1a387985bd56989702c5e1dc/blueberry-core/contracts/oracle/ChainlinkAdapterOracle.sol#L77-L97
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-The logic for getting the token's price from the Chainlink data feed should be placed in the try block, while some fallback logic when the access to the chainlink oracle data feed is denied should be placed in the catch block.
-
-In short use a try/catch block.
-
-
-# Issue M-11: Users can fail to closePositionFarm and lose their funds 
+# Issue M-8: Users can fail to closePositionFarm and lose their funds 
 
 Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/64 
 
@@ -1252,65 +1107,7 @@ Manual Review
 
 ## Recommendation
 
-# Issue M-12: Dos attack to openPositionFarm() 
-
-Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/48 
-
-## Found by 
-Bauer
-
-## Summary
- A bad actor can transfer 1 wei worth of the corresponding  token to the protocol before user calling the `openPositionFarm()` function, in order to increase the protocol's balance and build an LP position to call ICurvePool(pool).add_liquidity(), since the protocol only allows the curvel pool to spend the borrowed token, this will cause an error when Curve attempts to transfer other tokens out of the protocol.
-
-
-## Vulnerability Detail
-The `openPositionFarm()` function is used to add liquidity to Curve pool with 2 underlying tokens, with staking to Curve gauge. When add liquidity on curve ,the protocol use the borrowed token and the collateral token, it checks the number of tokens in the pool and creates an array of the supplied token amounts to be passed to the add_liquidity function.If the pool contains three tokens, the process is repeated with an array of three elements, and if the pool contains four tokens, an array of four elements is created and used. Here is the problem,a bad actor may transfer 1 wei worth of the corresponding  token to the protocol before user calling the `openPositionFarm()` function, in order to increase the protocol's balance and build an LP position to call ICurvePool(pool).add_liquidity(). However, since the protocol only allows the curvel pool to spend the borrowed token, this will cause an error when Curve attempts to transfer other tokens out of the protocol.
-```solidity
-  uint256 borrowBalance = _doBorrow(
-            param.borrowToken,
-            param.borrowAmount
-        );
-
-        // 3. Add liquidity on curve
-        _ensureApprove(param.borrowToken, pool, borrowBalance);
-        if (tokens.length == 2) {
-            uint256[2] memory suppliedAmts;
-            for (uint256 i = 0; i < 2; i++) {
-                suppliedAmts[i] = IERC20Upgradeable(tokens[i]).balanceOf(
-                    address(this)
-                );
-            }
-            ICurvePool(pool).add_liquidity(suppliedAmts, minLPMint);
-        } else if (tokens.length == 3) {
-            uint256[3] memory suppliedAmts;
-            for (uint256 i = 0; i < 3; i++) {
-                suppliedAmts[i] = IERC20Upgradeable(tokens[i]).balanceOf(
-                    address(this)
-                );
-            }
-            ICurvePool(pool).add_liquidity(suppliedAmts, minLPMint);
-        } else if (tokens.length == 4) {
-            uint256[4] memory suppliedAmts;
-            for (uint256 i = 0; i < 4; i++) {
-                suppliedAmts[i] = IERC20Upgradeable(tokens[i]).balanceOf(
-                    address(this)
-                );
-            }
-            ICurvePool(pool).add_liquidity(suppliedAmts, minLPMint);
-        }
-
-```
-## Impact
-User will not able to call the `openPositionFarm()` function to add liquidity to Curve pool
-## Code Snippet
-https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/spell/CurveSpell.sol#L84-L115
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-# Issue M-13: The protocol  will not be able to add liquidity on the curve with another token with a balance. 
+# Issue M-9: The protocol  will not be able to add liquidity on the curve with another token with a balance. 
 
 Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/47 
 
@@ -1364,7 +1161,7 @@ Manual Review
 ## Recommendation
 Allow the curve pool to spend tokens that have a balance in the protocol to add liquidity
 
-# Issue M-14: AuraSpell openPositionFarm does not join pool 
+# Issue M-10: AuraSpell openPositionFarm does not join pool 
 
 Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/46 
 
@@ -1454,250 +1251,4 @@ Manual Review
 ## Recommendation
 
 It is hard to tell the intent of the developer from this check. Maybe the issue is simply that `poolAmountOut` should be the sum or the max value out of `poolAmountFromA` and `poolAmountFromB` instead of the min.
-
-# Issue M-15: auraPools.deposit and auraPools.withdraw  boolean return value not handled in WAuraPools.sol 
-
-Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/41 
-
-## Found by 
-Bauer
-
-## Summary
-auraPools.deposit() and auraPools.withdraw() boolean return value not handled in WAuraPools.sol
-
-
-## Vulnerability Detail
-The `WAuraPools.mint()` function allows users to deposit "amount" of a specific pool token, identified by "pid". The deposited tokens are then transferred from the user's address to the contract's address. The function also ensures that the contract is approved to spend the deposited tokens by calling the "_ensureApprove" function with the specified amount.
-The `deposit()` function of the `auraPools` contract is then called to deposit the tokens into the specified pool.
-However, the protocol does not handle the AuraPool.withdrawAndUnwrap() boolean return value.
-```solidity
- function mint(
-        uint256 pid,
-        uint256 amount
-    ) external nonReentrant returns (uint256 id) {
-        (address lpToken, , , address crvRewarder, , ) = getPoolInfoFromPoolId(
-            pid
-        );
-        IERC20Upgradeable(lpToken).safeTransferFrom(
-            msg.sender,
-            address(this),
-            amount
-        );
-
-        _ensureApprove(lpToken, address(auraPools), amount);
-        auraPools.deposit(pid, amount, true);
-
-        uint256 crvRewardPerToken = IAuraRewarder(crvRewarder).rewardPerToken();
-        id = encodeId(pid, crvRewardPerToken);
-        _mint(msg.sender, id, amount, "");
-        // Store extra rewards info
-        uint extraRewardsCount = IAuraRewarder(crvRewarder)
-            .extraRewardsLength();
-        for (uint i = 0; i < extraRewardsCount; i++) {
-            address extraRewarder = IAuraRewarder(crvRewarder).extraRewards(i);
-            uint rewardPerToken = IAuraRewarder(extraRewarder).rewardPerToken();
-            accExtPerShare[id].push(rewardPerToken);
-        }
-    }
-```
-In the AuraBooster implmenetation, a Boolean is indeed returned to acknowledge that deposit is completely successfully.
-
-https://etherscan.io/address/0x7818A1DA7BD1E64c199029E86Ba244a9798eEE10#code#F34#L1
-```solidity
-  /**
-     * @notice  Deposits an "_amount" to a given gauge (specified by _pid), mints a `DepositToken`
-     *          and subsequently stakes that on Convex BaseRewardPool
-     */
-    function deposit(uint256 _pid, uint256 _amount, bool _stake) public returns(bool){
-
-```
-The same issue for `auraPools.withdraw()`
-## Impact
-If the boolean value is not handled, the transaction may fail silently.
-
-
-## Code Snippet
-https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/wrapper/WAuraPools.sol#L209
-https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/wrapper/WAuraPools.sol#L248
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-Recommend checking for success return value
-
-```solidity
-  bool depositSuccess =   auraPools.deposit(pid, amount, true);
- require(depositSuccess , 'deposit failed');
-
-```
-
-# Issue M-16: IchiVaultOracle getPrice will fail during price crashes 
-
-Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/28 
-
-## Found by 
-cducrest-brainbot
-
-## Summary
-
-The function to get the price of the IchiVault LP token will fail when TWAP and spot price differ too much. This will be the case when price of the LP token crashes. 
-
-The oracle will revert and positions using IchiVault LP token won't be able to be repaid / liquidated when price crashes, when this is needed the most.
-
-## Vulnerability Detail
-
-The function `getPrice()` checks the spot and twap price of the LP token, it reverts when they differ too much:
-
-```solidity
-    function getPrice(address token) external view override returns (uint256) {
-        IICHIVault vault = IICHIVault(token);
-        uint256 totalSupply = vault.totalSupply();
-        if (totalSupply == 0) return 0;
-
-        address token0 = vault.token0();
-        address token1 = vault.token1();
-
-        // Check price manipulations on Uni V3 pool by flashloan attack
-        uint256 spotPrice = spotPrice0InToken1(vault);
-        uint256 twapPrice = twapPrice0InToken1(vault);
-        uint256 maxPriceDeviation = maxPriceDeviations[token0];
-        if (!_isValidPrices(spotPrice, twapPrice, maxPriceDeviation))
-            revert Errors.EXCEED_DEVIATION();
-
-        // Total reserve / total supply
-        (uint256 r0, uint256 r1) = vault.getTotalAmounts();
-        uint256 px0 = base.getPrice(address(token0));
-        uint256 px1 = base.getPrice(address(token1));
-        uint256 t0Decimal = IERC20Metadata(token0).decimals();
-        uint256 t1Decimal = IERC20Metadata(token1).decimals();
-
-        uint256 totalReserve = (r0 * px0) /
-            10 ** t0Decimal +
-            (r1 * px1) /
-            10 ** t1Decimal;
-
-        return (totalReserve * 10 ** vault.decimals()) / totalSupply;
-    }
-```
-
-## Impact
-
-The twap period can range from 1 hour to 2 days. If the twap period is long enough or the `maxPriceDeviations` small enough, the pricing oracle will revert when price crashes (or spikes) and prevent actions on positions using IchiVault LP tokens.
-
-The liquidation / repayment will be impossible when most needed, during important changes of market prices.
-
-As noted in the comment and understood from the code, the intent of this check is to prevent price manipulation of the LP token. If the `maxPriceDeviations`, the price oracle is vulnerable to price manipulation since it does not the fair LP token pricing method.
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2023-04-blueberry/blob/96eb1829571dc46e1a387985bd56989702c5e1dc/blueberry-core/contracts/oracle/IchiVaultOracle.sol#L110-L138
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Use the [fair lp token pricing](https://cmichel.io/pricing-lp-tokens/) strategy instead of checking twap and spot price.
-
-# Issue M-17: Transaction will revert when using USDT tokens (or other non-compliant ERC20 tokens) 
-
-Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/15 
-
-## Found by 
-n1punp
-
-## Summary
-Transaction will revert when using USDT tokens
-
-## Vulnerability Detail
-USDT token has a non-standard `approve` function implementation, as it doesn't return a boolean. So, normal `IERC20` interface will cause the EVM to expect a boolean as a return value but it won't get any when `token` is USDT, and so the tx will revert. 
-
-
-## Impact
-Any contract functionality that utilizes `_ensureApprove` will cause tx revert when the token is USDT, including `lend`, `withdrawLend` , and executions in all spells.
-
-## Code Snippet
-https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/utils/EnsureApprove.sol#L22-L23
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-- use `safeApprove` from OpenZeppelin's standard `SafeERC20.sol`
-
-# Issue M-18: Accrue function is not called before executing some functions 
-
-Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/10 
-
-## Found by 
-Tendency, devScrooge
-
-## Summary
-As the NatSpec comments and documentation indicate, the functions `getDebtValue`, `getIsolatedCollateralValue`, `getPositionDebt`,  on the `BlueBerryBank` contract, the `accrue` function should be called first to get the current debt, but it is actually not being called. 
-
-## Vulnerability Detail
-
-The NatSpec lines [340](https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/BlueBerryBank.sol#L340), [420](https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/BlueBerryBank.sol#L420), [431](https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/BlueBerryBank.sol#L431) and also in the [Blueberry docs](https://docs.blueberry.garden/developer-guides/contracts/blueberry-bank/blueberry-bank-contract) indicates that: `The function should be called after calling the accrue function to get the current debt`. 
-
-But actually none of these function (`getDebtValue`, `getIsolatedCollateralValue`, `getPositionDebt`) are calling the `accrue` function before.
-
-## Impact
-No calling the `accrue` function before executing the mentioned function means that the following operations and/or calculations are not done with the actual value of the current debt, thus a non-correct value is being used. 
-
-Inside the `BlueBerryBank` contract, all of the mentioned functions are called by functions that are called by other functions that implement the `poke `modifier, which in turn calls the accrue function. This means that the debt is going to be updated to the current one so the value will be correct but the `getDebtValue`, `getIsolatedCollateralValue`, `getPositionDebt` functions are public so future or external implemented contracts can call them and use a non update value for the current debt.
-
-## Code Snippet
-https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/BlueBerryBank.sol#L340,
-https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/BlueBerryBank.sol#L420, 
-https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/BlueBerryBank.sol#L431
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-Add the `poke` modifier to the `getDebtValue`, `getIsolatedCollateralValue`, `getPositionDebt` functions so that if external contracts call to this functions a correct value of the current debt is going to be used correct.
-
-# Issue M-19: Borrower can't repay but can be liquidated as token whitelist can prevent existing positions from repaying 
-
-Source: https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/4 
-
-## Found by 
-dacian
-
-## Summary
-Borrower can't repay but can be liquidated as token whitelist can prevent existing positions from repaying.
-
-## Vulnerability Detail
-BlueBerryBank.repay() has onlyWhitelistedToken() modifier, while BlueBerryBank.liquidate() does not; both end up calling _repay(). If Borrower has an existing position and then the token is removed from the whitelist, Borrower is unable to repay but can still be liquidated.
-
-## Impact
-Borrower with existing position can't repay their loan but can be liquidated - this severely disadvantages the Borrower guaranteeing their liquidation with no possibility to repay.
-
-## Code Snippet
-BlueBerryBank.liquidate() [L487-491](https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/BlueBerryBank.sol#L487-L491) vs BlueBerryBank.repay() [L718-721](https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/BlueBerryBank.sol#L718-L721)
-
-## Tool used
-Weaponized Autism (I read through every single c4/sherlock lending/borrowing contest and examined every single high/medium finding, since the beginning. Kinda crazy right?)
-
-## Recommendation
-First please consider [Repayments Paused While Liquidations Enabled](https://dacian.me/lending-borrowing-defi-attacks#heading-repayments-paused-while-liquidations-enabled) from BlueBerry's first audit finding. BlueBerry addressed this issue by having liquidate() call isRepayAllowed() [L492](https://github.com/sherlock-audit/2023-04-blueberry/blob/main/blueberry-core/contracts/BlueBerryBank.sol#L492)
-
-However the same state can also be reached due to the inconsistent use of onlyWhitelistedToken() modifier between repay() and liquidate(). So one potential fix is to have liquidate() also use onlyWhitelistedToken() modifier, therefore at least if the Borrower can't repay, they also can't be liquidated.
-
-Now secondly please consider [Collateral Pause Stops Existing Repayment & Liquidation](https://dacian.me/lending-borrowing-defi-attacks#heading-collateral-pause-stops-existing-repayment-andamp-liquidation), a [high finding](https://github.com/sherlock-audit/2022-11-isomorph-judging/issues/57) from Sherlock's Isomorph Audit. In this audit it was judged that if governance disallowed a previously allowed token and if this causes *existing* positions to not be able to be repaid & liquidated, this was also a *high* finding, as governance disallowing a token should only apply to *new* positions, but existing positions should be allowed to continue to be repaid and liquidated, even if the token is no longer approved by governance.
-
-So ideally neither repay() nor liquidate() would have onlyWhitelistedToken() - this is fair to all market participants and is the most consistent fix in line with the precedent set by the judging in Sherlock's Isomorph audit. I have submitted as High since that is what Sherlock's Isomorph audit classified the same bug. If my submission is downgraded to medium, kindly please explain why the same issue was High in Isomorph but is only medium here.
-
-My submission actually combines 2 distinct issues which have been recognized separately in previous Sherlock competitions:
-
-* Borrower can't repay but can be liquidated
-* Governance token disallow prevents existing positions from repay (and in other contests from liquidation)
-
-However because the primary goal of the audit is to benefit the sponsor, and because the ideal solution (remove onlyWhitelistedToken() from repay()) resolves both issues, I have combined them into this single issue to keep all discussion concentrated in the one place. I do hope that this won't disadvantage me in judging, and at the very least combining both issues into one submission should uphold this submission as a high finding.
-
 
